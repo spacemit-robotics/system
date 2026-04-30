@@ -1,0 +1,41 @@
+# --- 编译产物 ---
+build/
+bin/
+lib/
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+
+# --- Python 缓存 ---
+__pycache__/
+*.py[cod]
+*$py.class
+dist/
+build/
+*.egg-info/
+venv/
+.venv/
+
+# --- 模型与大数据（见大文件策略） ---
+*.onnx
+*.gguf
+*.weights
+*.bin
+*.tar.gz
+*.zip
+
+# --- IDE 与系统 ---
+.vscode/
+.cursor/
+.idea/
+.DS_Store
+._*
+.AppleDouble
+.DS*
+*.swp
+
+# --- 测试/运行输出 ---
+output_*.png
+v2d_output/

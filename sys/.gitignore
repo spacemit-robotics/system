@@ -1,0 +1,17 @@
+# --- 编译产物 ---
+build/
+bin/
+lib/
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+
+# --- IDE 与系统 ---
+.vscode/
+.cursor/
+.idea/
+.DS_Store
+._*
+*.swp
