@@ -171,6 +171,10 @@ static int set_cpu_governor(const char *governor)
         if (fd < 0) {
             int saved_errno = errno;
 
+            if (saved_errno == ENOENT || saved_errno == ENODEV) {
+                printf("CPU %d has no cpufreq governor, skipping\n", i);
+                continue;
+            }
             fprintf(stderr, "Failed to open governor for CPU %d: %s\n",
                     i, strerror(saved_errno));
             errno = saved_errno;
