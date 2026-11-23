@@ -179,7 +179,8 @@ static int set_cpu_governor(const char *governor)
         ssize_t written = write(fd, governor, strlen(governor));
         int saved_errno = written < 0 ? errno : EIO;
 
-        close(fd);
+        if (close(fd) < 0 && saved_errno == 0)
+            saved_errno = errno;
         if (written != (ssize_t)strlen(governor)) {
             fprintf(stderr, "Failed to set governor for CPU %d: %s\n",
                     i, strerror(saved_errno));
@@ -224,7 +225,8 @@ static int set_backlight(int brightness)
     ssize_t written = write(fd, value, strlen(value));
     int saved_errno = written < 0 ? errno : EIO;
 
-    close(fd);
+    if (close(fd) < 0 && saved_errno == 0)
+        saved_errno = errno;
     if (written != (ssize_t)strlen(value)) {
         fprintf(stderr, "Failed to set backlight: %s\n", strerror(saved_errno));
         errno = saved_errno;
