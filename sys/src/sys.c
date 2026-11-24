@@ -173,6 +173,7 @@ static int set_cpu_governor(const char *governor)
 
             if (saved_errno == ENOENT || saved_errno == ENODEV) {
                 printf("CPU %d has no cpufreq governor, skipping\n", i);
+                errno = saved_errno;
                 continue;
             }
             fprintf(stderr, "Failed to open governor for CPU %d: %s\n",
@@ -182,8 +183,9 @@ static int set_cpu_governor(const char *governor)
         }
         ssize_t written = write(fd, governor, strlen(governor));
         int saved_errno = written < 0 ? errno : EIO;
+        int close_ret = close(fd);
 
-        if (close(fd) < 0 && saved_errno == 0)
+        if (close_ret < 0 && saved_errno == 0)
             saved_errno = errno;
         if (written != (ssize_t)strlen(governor)) {
             fprintf(stderr, "Failed to set governor for CPU %d: %s\n",
