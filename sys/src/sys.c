@@ -87,8 +87,11 @@ static int read_text_file(const char *path, char *buffer, size_t buffer_size)
     }
 
     bytes_read = read(fd, buffer, buffer_size - 1);
+    int read_errno = bytes_read < 0 ? errno : 0;
     close(fd);
     if (bytes_read <= 0) {
+        if (read_errno)
+            errno = read_errno;
         return -1;
     }
 
@@ -122,6 +125,7 @@ static int watchdog_init(void)
         int saved_errno = errno;
 
         if (saved_errno == ENOENT || saved_errno == ENODEV) {
+            errno = saved_errno;
             return 1;  /* Optional device is absent. */
         }
         fprintf(stderr, "Failed to open watchdog device %s: %s\n",
