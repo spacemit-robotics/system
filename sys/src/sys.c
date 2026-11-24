@@ -571,9 +571,9 @@ static int watchdog_feed_checked(void)
     }
 
     ssize_t written = write(watchdog_fd, "1", 1);
-    if (written != 1) {
-        int saved_errno = written < 0 ? errno : EIO;
+    int saved_errno = written < 0 ? errno : EIO;
 
+    if (written != 1) {
         fprintf(stderr, "Failed to feed watchdog: %s\n", strerror(saved_errno));
         errno = saved_errno;
         return -1;
