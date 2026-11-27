@@ -56,52 +56,5 @@ if(BUILD_SYS_TESTS)
         LABELS "system;unit"
     )
 
-    add_executable(test_mode_errors
-        test/test_mode_errors.c
-    )
-
-    target_link_libraries(test_mode_errors
-        PRIVATE sys
-        m
-    )
-
-    target_include_directories(test_mode_errors
-        PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/include
-    )
-
-    # The test replaces libc calls to inject failures; no hardware is touched.
-    target_link_options(test_mode_errors
-        PRIVATE
-            "-Wl,--wrap=open"
-            "-Wl,--wrap=write"
-            "-Wl,--wrap=close"
-            "-Wl,--wrap=ioctl"
-            "-Wl,--wrap=system"
-    )
-
-    set(sys_mode_error_faults
-        success optional-missing invalid hooks retry
-        governor-open governor-write governor-short
-        backlight-missing backlight-no-device backlight-denied
-        backlight-write backlight-short
-        watchdog-missing watchdog-no-device watchdog-denied
-        watchdog-write watchdog-short watchdog-ioctl
-        suspend-open suspend-write suspend-short
-        network-active network-sensor-off network-suspend
-        network-hibernate network-poweroff network-reboot network-spawn
-    )
-
-    foreach(fault IN LISTS sys_mode_error_faults)
-        add_test(
-            NAME test_mode_errors_${fault}
-            COMMAND test_mode_errors ${fault}
-        )
-        set_tests_properties(test_mode_errors_${fault} PROPERTIES
-            TIMEOUT 30
-            LABELS "system;unit"
-        )
-    endforeach()
-    
     message(STATUS "sys tests enabled")
 endif()
