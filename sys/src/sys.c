@@ -68,6 +68,8 @@ static int hook_count = 0;
 static int watchdog_fd = -1;
 static int watchdog_initialized = 0;
 
+static int watchdog_feed_checked(void);
+
 /* --- System control functions --- */
 
 static int read_text_file(const char *path, char *buffer, size_t buffer_size)
@@ -85,8 +87,11 @@ static int read_text_file(const char *path, char *buffer, size_t buffer_size)
     }
 
     bytes_read = read(fd, buffer, buffer_size - 1);
+    int read_errno = bytes_read < 0 ? errno : 0;
     close(fd);
     if (bytes_read <= 0) {
+        if (read_errno)
+            errno = read_errno;
         return -1;
     }
 
@@ -104,7 +109,7 @@ static int read_text_file(const char *path, char *buffer, size_t buffer_size)
 
 /**
     * Initialize watchdog device
-    * @return: 0 on success, negative on error
+    * @return: 0 on success, 1 if absent, negative on error
     */
 static int watchdog_init(void)
 {
@@ -117,15 +122,26 @@ static int watchdog_init(void)
     /* Open watchdog device */
     watchdog_fd = open(WATCHDOG_DEVICE, O_WRONLY);
     if (watchdog_fd < 0) {
-        fprintf(stderr, "Failed to open watchdog device: %s\n", WATCHDOG_DEVICE);
+        int saved_errno = errno;
+
+        if (saved_errno == ENOENT || saved_errno == ENODEV) {
+            errno = saved_errno;
+            return 1;  /* Optional device is absent. */
+        }
+        fprintf(stderr, "Failed to open watchdog device %s: %s\n",
+                WATCHDOG_DEVICE, strerror(saved_errno));
+        errno = saved_errno;
         return -1;
     }
 
     /* Set watchdog timeout */
     if (ioctl(watchdog_fd, WDIOC_SETTIMEOUT, &timeout) < 0) {
-        fprintf(stderr, "Failed to set watchdog timeout\n");
+        int saved_errno = errno;
+
+        fprintf(stderr, "Failed to set watchdog timeout: %s\n", strerror(saved_errno));
         close(watchdog_fd);
         watchdog_fd = -1;
+        errno = saved_errno;
         return -1;
     }
 
@@ -156,11 +172,30 @@ static int set_cpu_governor(const char *governor)
     for (int i = 0; i < cpu_count; i++) {
         snprintf(path, sizeof(path), CPU_FREQ_SCALING_GOVERNOR, i);
         fd = open(path, O_WRONLY);
-        if (fd >= 0) {
-            if (write(fd, governor, strlen(governor)) < 0) {
-                fprintf(stderr, "Failed to set governor for CPU %d\n", i);
+        if (fd < 0) {
+            int saved_errno = errno;
+
+            if (saved_errno == ENOENT || saved_errno == ENODEV) {
+                printf("CPU %d has no cpufreq governor, skipping\n", i);
+                errno = saved_errno;
+                continue;
             }
-            close(fd);
+            fprintf(stderr, "Failed to open governor for CPU %d: %s\n",
+                    i, strerror(saved_errno));
+            errno = saved_errno;
+            return -1;
+        }
+        ssize_t written = write(fd, governor, strlen(governor));
+        int saved_errno = written < 0 ? errno : EIO;
+        int close_ret = close(fd);
+
+        if (close_ret < 0 && saved_errno == 0)
+            saved_errno = errno;
+        if (written != (ssize_t)strlen(governor)) {
+            fprintf(stderr, "Failed to set governor for CPU %d: %s\n",
+                    i, strerror(saved_errno));
+            errno = saved_errno;
+            return -1;
         }
     }
 
@@ -185,18 +220,28 @@ static int set_backlight(int brightness)
 
     fd = open(BACKLIGHT_BRIGHTNESS_PATH, O_WRONLY);
     if (fd < 0) {
-        printf("Backlight control not available\n");
-        return 0;  /* Not critical */
-    }
+        int saved_errno = errno;
 
-    snprintf(value, sizeof(value), "%d", brightness);
-    if (write(fd, value, strlen(value)) < 0) {
-        fprintf(stderr, "Failed to set backlight\n");
-        close(fd);
+        if (saved_errno == ENOENT || saved_errno == ENODEV) {
+            printf("Backlight control not available\n");
+            return 0;  /* Optional device is absent. */
+        }
+        fprintf(stderr, "Failed to open backlight: %s\n", strerror(saved_errno));
+        errno = saved_errno;
         return -1;
     }
 
-    close(fd);
+    snprintf(value, sizeof(value), "%d", brightness);
+    ssize_t written = write(fd, value, strlen(value));
+    int saved_errno = written < 0 ? errno : EIO;
+
+    if (close(fd) < 0 && saved_errno == 0)
+        saved_errno = errno;
+    if (written != (ssize_t)strlen(value)) {
+        fprintf(stderr, "Failed to set backlight: %s\n", strerror(saved_errno));
+        errno = saved_errno;
+        return -1;
+    }
     printf("Backlight set to: %d%%\n", brightness);
     return 0;
 }
@@ -218,7 +263,8 @@ static int control_network(bool enable)
     if (ret == 0) {
         printf("Network %s\n", enable ? "enabled" : "disabled");
     } else {
-        printf("Network control may require root privileges\n");
+        fprintf(stderr, "Network control failed (status %d)\n", ret);
+        return -1;
     }
 
     return 0;
@@ -241,13 +287,15 @@ static int suspend_to_ram(void)
         return -1;
     }
 
-    if (write(fd, state, strlen(state)) < 0) {
-        fprintf(stderr, "Failed to suspend to RAM\n");
-        close(fd);
-        return -1;
-    }
+    ssize_t written = write(fd, state, strlen(state));
+    int saved_errno = written < 0 ? errno : EIO;
 
     close(fd);
+    if (written != (ssize_t)strlen(state)) {
+        fprintf(stderr, "Failed to suspend to RAM: %s\n", strerror(saved_errno));
+        errno = saved_errno;
+        return -1;
+    }
     return 0;
 }
 
@@ -268,13 +316,15 @@ static int suspend_to_disk(void)
         return -1;
     }
 
-    if (write(fd, state, strlen(state)) < 0) {
-        fprintf(stderr, "Failed to suspend to disk\n");
-        close(fd);
-        return -1;
-    }
+    ssize_t written = write(fd, state, strlen(state));
+    int saved_errno = written < 0 ? errno : EIO;
 
     close(fd);
+    if (written != (ssize_t)strlen(state)) {
+        fprintf(stderr, "Failed to suspend to disk: %s\n", strerror(saved_errno));
+        errno = saved_errno;
+        return -1;
+    }
     return 0;
 }
 
@@ -324,16 +374,24 @@ static int mode_active(void)
     printf("Entering ACTIVE mode\n");
 
     /* Set CPU to performance mode */
-    set_cpu_governor("performance");
+    if (set_cpu_governor("performance") != 0) {
+        return -1;
+    }
 
     /* Set backlight to full brightness */
-    set_backlight(100);
+    if (set_backlight(100) != 0) {
+        return -1;
+    }
 
     /* Enable network */
-    control_network(true);
+    if (control_network(true) != 0) {
+        return -1;
+    }
 
     /* Feed watchdog */
-    sys_watchdog_feed();
+    if (watchdog_feed_checked() != 0) {
+        return -1;
+    }
 
     printf("ACTIVE mode activated\n");
     return 0;
@@ -348,16 +406,24 @@ static int mode_idle(void)
     printf("Entering IDLE mode\n");
 
     /* Set CPU to powersave mode */
-    set_cpu_governor("powersave");
+    if (set_cpu_governor("powersave") != 0) {
+        return -1;
+    }
 
     /* Turn off backlight */
-    set_backlight(0);
+    if (set_backlight(0) != 0) {
+        return -1;
+    }
 
     /* Keep network on */
-    control_network(true);
+    if (control_network(true) != 0) {
+        return -1;
+    }
 
     /* Feed watchdog */
-    sys_watchdog_feed();
+    if (watchdog_feed_checked() != 0) {
+        return -1;
+    }
 
     printf("IDLE mode activated\n");
     return 0;
@@ -372,19 +438,27 @@ static int mode_sensor_off(void)
     printf("Entering SENSOR_OFF mode\n");
 
     /* Set CPU to powersave mode */
-    set_cpu_governor("powersave");
+    if (set_cpu_governor("powersave") != 0) {
+        return -1;
+    }
 
     /* Turn off backlight */
-    set_backlight(0);
+    if (set_backlight(0) != 0) {
+        return -1;
+    }
 
     /* Keep network on */
-    control_network(true);
+    if (control_network(true) != 0) {
+        return -1;
+    }
 
     /* TODO: Disable sensors (IMU, camera, etc.) */
     printf("Sensors disabled\n");
 
     /* Feed watchdog */
-    sys_watchdog_feed();
+    if (watchdog_feed_checked() != 0) {
+        return -1;
+    }
 
     printf("SENSOR_OFF mode activated\n");
     return 0;
@@ -399,7 +473,9 @@ static int mode_suspend(void)
     printf("Entering SUSPEND mode\n");
 
     /* Disable network before suspend */
-    control_network(false);
+    if (control_network(false) != 0) {
+        return -1;
+    }
 
     /* Suspend to RAM */
     return suspend_to_ram();
@@ -414,7 +490,9 @@ static int mode_hibernate(void)
     printf("Entering HIBERNATE mode\n");
 
     /* Disable network before hibernation */
-    control_network(false);
+    if (control_network(false) != 0) {
+        return -1;
+    }
 
     /* Suspend to disk */
     return suspend_to_disk();
@@ -429,7 +507,9 @@ static int mode_poweroff(void)
     printf("Entering POWEROFF mode\n");
 
     /* Disable network */
-    control_network(false);
+    if (control_network(false) != 0) {
+        return -1;
+    }
 
     /* Power off */
     return power_off();
@@ -444,7 +524,9 @@ static int mode_reboot(void)
     printf("Entering REBOOT mode\n");
 
     /* Disable network */
-    control_network(false);
+    if (control_network(false) != 0) {
+        return -1;
+    }
 
     /* Reboot */
     return reboot_system();
@@ -481,27 +563,35 @@ static int execute_mode_operations(enum sys_mode mode)
 /**
     * Feed the watchdog timer
     */
+static int watchdog_feed_checked(void)
+{
+    if (!watchdog_initialized) {
+        int ret = watchdog_init();
+
+        if (ret > 0) {
+            return 0;
+        }
+        if (ret < 0) {
+            return -1;
+        }
+    }
+
+    ssize_t written = write(watchdog_fd, "1", 1);
+    int saved_errno = written < 0 ? errno : EIO;
+
+    if (written != 1) {
+        fprintf(stderr, "Failed to feed watchdog: %s\n", strerror(saved_errno));
+        errno = saved_errno;
+        return -1;
+    }
+
+    printf("Watchdog fed successfully\n");
+    return 0;
+}
+
 void sys_watchdog_feed(void)
 {
-    int ret;
-
-    /* Initialize watchdog on first call */
-    if (!watchdog_initialized) {
-        if (watchdog_init() < 0) {
-            fprintf(stderr, "Watchdog initialization failed\n");
-            return;
-        }
-    }
-
-    /* Feed the watchdog by writing to device */
-    if (watchdog_fd >= 0) {
-        ret = write(watchdog_fd, "1", 1);
-        if (ret < 0) {
-            fprintf(stderr, "Failed to feed watchdog\n");
-        } else {
-            printf("Watchdog fed successfully\n");
-        }
-    }
+    (void)watchdog_feed_checked();
 }
 
 int sys_set_mode(enum sys_mode mode)

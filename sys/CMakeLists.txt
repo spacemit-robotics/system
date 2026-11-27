@@ -55,6 +55,6 @@ if(BUILD_SYS_TESTS)
         TIMEOUT 30
         LABELS "system;unit"
     )
-    
+
     message(STATUS "sys tests enabled")
 endif()

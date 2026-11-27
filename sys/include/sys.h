@@ -27,6 +27,10 @@ enum sys_mode {
 
 /* --- system control --- */
 
+/* Return 0 after all required operations succeed; otherwise preserve the last
+ * successful mode. Already completed hardware operations are not rolled back.
+ * Backlight and watchdog are optional only when their devices are absent.
+ */
 int sys_set_mode(enum sys_mode mode);
 enum sys_mode sys_get_mode(void);
 
